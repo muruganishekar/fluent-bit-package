@@ -1,0 +1,96 @@
+name: Publish target config
+
+# Single source of truth for where (and with which infrastructure-publish-action version) packages are published.
+#
+# The target is selected by the repository variable PUBLISH_VERSION (v1 | v2), defaulting to v1 when unset:
+#   v1 -> infrastructure-publish-action@v1 (pinned SHA) -> legacy buckets (nr-downloads-ohai-staging / nr-downloads-main)
+#   v2 -> infrastructure-publish-action@v2              -> batch buckets  (nr-downloads-ohai-batch-staging / nr-downloads-ohai-batch-prod)
+#
+# Rollback: set the repository variable PUBLISH_VERSION back to v1 (or delete it). No code change needed.
+# Before flipping in either direction, sync the buckets so the target repository contains every release
+# published to the other one.
+
+on:
+  workflow_call:
+    inputs:
+      ENV:
+        description: 'Environment to publish to: staging | production'
+        required: true
+        type: string
+    outputs:
+      publish_version:
+        description: 'Selected publish-action version: v1 | v2'
+        value: ${{ jobs.config.outputs.publish_version }}
+      aws_s3_bucket_name:
+        value: ${{ jobs.config.outputs.aws_s3_bucket_name }}
+      aws_s3_lock_bucket_name:
+        value: ${{ jobs.config.outputs.aws_s3_lock_bucket_name }}
+      access_point_host:
+        value: ${{ jobs.config.outputs.access_point_host }}
+      repo_endpoint:
+        description: 'Repository endpoint the E2E tests install from'
+        value: ${{ jobs.config.outputs.repo_endpoint }}
+
+permissions:
+  contents: read
+
+jobs:
+  config:
+    name: Resolve publish target
+    runs-on: ubuntu-24.04
+    outputs:
+      publish_version: ${{ steps.resolve.outputs.publish_version }}
+      aws_s3_bucket_name: ${{ steps.resolve.outputs.aws_s3_bucket_name }}
+      aws_s3_lock_bucket_name: ${{ steps.resolve.outputs.aws_s3_lock_bucket_name }}
+      access_point_host: ${{ steps.resolve.outputs.access_point_host }}
+      repo_endpoint: ${{ steps.resolve.outputs.repo_endpoint }}
+    steps:
+      - name: Resolve publish target
+        id: resolve
+        env:
+          TARGET_ENV: ${{ inputs.ENV }}
+          VERSION_VAR: ${{ vars.PUBLISH_VERSION }}
+        run: |
+          version="${VERSION_VAR:-v1}"
+
+          case "${version}" in
+            v1|v2) ;;
+            *) echo "::error::PUBLISH_VERSION must be v1 or v2, got '${version}'"; exit 1 ;;
+          esac
+
+          case "${TARGET_ENV}-${version}" in
+            staging-v1)
+              bucket="nr-downloads-ohai-staging"
+              lock_bucket="onhost-ci-lock-staging"
+              access_point_host="staging"
+              ;;
+            staging-v2)
+              bucket="nr-downloads-ohai-batch-staging"
+              lock_bucket="onhost-ci-lock-staging"
+              access_point_host="staging"
+              ;;
+            production-v1)
+              bucket="nr-downloads-main"
+              lock_bucket="onhost-ci-lock"
+              access_point_host="production"
+              ;;
+            production-v2)
+              bucket="nr-downloads-ohai-batch-prod"
+              lock_bucket="onhost-ci-lock"
+              access_point_host="production"
+              ;;
+            *)
+              echo "::error::ENV must be staging or production, got '${TARGET_ENV}'"
+              exit 1
+              ;;
+          esac
+
+          {
+            echo "publish_version=${version}"
+            echo "aws_s3_bucket_name=${bucket}"
+            echo "aws_s3_lock_bucket_name=${lock_bucket}"
+            echo "access_point_host=${access_point_host}"
+            echo "repo_endpoint=https://${bucket}.s3.amazonaws.com/"
+          } >> "${GITHUB_OUTPUT}"
+
+          echo "Publishing ${TARGET_ENV} with publish-action ${version} to s3://${bucket}"
