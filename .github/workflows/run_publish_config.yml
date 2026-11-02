@@ -1,10 +1,11 @@
 name: Publish target config
 
-# Single source of truth for where (and with which infrastructure-publish-action version) packages are published.
+# Single source of truth for which S3 bucket (and credentials) packages are published to.
+# The publish action stays infrastructure-publish-action@v1 (pinned SHA); only the target bucket changes.
 #
 # The target is selected by the repository variable PUBLISH_VERSION (v1 | v2), defaulting to v1 when unset:
-#   v1 -> infrastructure-publish-action@v1 (pinned SHA) -> legacy buckets (nr-downloads-ohai-staging / nr-downloads-main)
-#   v2 -> infrastructure-publish-action@v2              -> batch buckets  (nr-downloads-ohai-batch-staging / nr-downloads-ohai-batch-prod)
+#   v1 -> legacy buckets (nr-downloads-ohai-staging / nr-downloads-main)
+#   v2 -> batch buckets  (nr-downloads-ohai-batch-staging / nr-downloads-ohai-batch-prod)
 #
 # Rollback: set the repository variable PUBLISH_VERSION back to v1 (or delete it). No code change needed.
 # Before flipping in either direction, sync the buckets so the target repository contains every release
@@ -19,7 +20,7 @@ on:
         type: string
     outputs:
       publish_version:
-        description: 'Selected publish-action version: v1 | v2'
+        description: 'Selected bucket set: v1 (legacy) | v2 (batch)'
         value: ${{ jobs.config.outputs.publish_version }}
       aws_s3_bucket_name:
         value: ${{ jobs.config.outputs.aws_s3_bucket_name }}
@@ -93,4 +94,4 @@ jobs:
             echo "repo_endpoint=https://${bucket}.s3.amazonaws.com/"
           } >> "${GITHUB_OUTPUT}"
 
-          echo "Publishing ${TARGET_ENV} with publish-action ${version} to s3://${bucket}"
+          echo "Publishing ${TARGET_ENV} with bucket set ${version} to s3://${bucket}"
