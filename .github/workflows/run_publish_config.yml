@@ -26,6 +26,12 @@ on:
         value: ${{ jobs.config.outputs.aws_s3_bucket_name }}
       aws_s3_lock_bucket_name:
         value: ${{ jobs.config.outputs.aws_s3_lock_bucket_name }}
+      aws_region:
+        description: 'AWS region of the publish bucket: us-east-1 (v1) | us-east-2 (v2)'
+        value: ${{ jobs.config.outputs.aws_region }}
+      aws_s3_lock_bucket_region:
+        description: 'AWS region of the lock bucket (us-east-1 for both v1 and v2)'
+        value: ${{ jobs.config.outputs.aws_s3_lock_bucket_region }}
       access_point_host:
         value: ${{ jobs.config.outputs.access_point_host }}
       repo_endpoint:
@@ -43,6 +49,8 @@ jobs:
       publish_version: ${{ steps.resolve.outputs.publish_version }}
       aws_s3_bucket_name: ${{ steps.resolve.outputs.aws_s3_bucket_name }}
       aws_s3_lock_bucket_name: ${{ steps.resolve.outputs.aws_s3_lock_bucket_name }}
+      aws_region: ${{ steps.resolve.outputs.aws_region }}
+      aws_s3_lock_bucket_region: ${{ steps.resolve.outputs.aws_s3_lock_bucket_region }}
       access_point_host: ${{ steps.resolve.outputs.access_point_host }}
       repo_endpoint: ${{ steps.resolve.outputs.repo_endpoint }}
     steps:
@@ -57,6 +65,13 @@ jobs:
           case "${version}" in
             v1|v2) ;;
             *) echo "::error::PUBLISH_VERSION must be v1 or v2, got '${version}'"; exit 1 ;;
+          esac
+
+          # v1 buckets are in us-east-1, v2 (batch) buckets are in us-east-2. The shared lock buckets stay in us-east-1.
+          lock_bucket_region="us-east-1"
+          case "${version}" in
+            v1) region="us-east-1" ;;
+            v2) region="us-east-2" ;;
           esac
 
           # access_point_host is written into the apt mirror source and the generated .repo files, so v2 must
@@ -93,6 +108,8 @@ jobs:
             echo "publish_version=${version}"
             echo "aws_s3_bucket_name=${bucket}"
             echo "aws_s3_lock_bucket_name=${lock_bucket}"
+            echo "aws_region=${region}"
+            echo "aws_s3_lock_bucket_region=${lock_bucket_region}"
             echo "access_point_host=${access_point_host}"
             echo "repo_endpoint=https://${bucket}.s3.amazonaws.com/"
           } >> "${GITHUB_OUTPUT}"
