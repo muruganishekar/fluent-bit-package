@@ -44,13 +44,22 @@ jobs:
     name: Publish linux packages to production
     needs: [ get_release_tag, publish_config ]
     runs-on: ubuntu-24.04
-    env:
-      # Select batch-bucket credentials (PUBLISH_VERSION=v2) when available, otherwise fall back to the existing org secrets
-      AWS_ACCESS_KEY_ID: ${{ (needs.publish_config.outputs.publish_version == 'v2' && secrets.OHAI_AWS_ACCESS_KEY_ID_PRODUCTION_V2) || secrets.OHAI_AWS_ACCESS_KEY_ID_PRODUCTION }}
-      AWS_SECRET_ACCESS_KEY: ${{ (needs.publish_config.outputs.publish_version == 'v2' && secrets.OHAI_AWS_SECRET_ACCESS_KEY_PRODUCTION_V2) || secrets.OHAI_AWS_SECRET_ACCESS_KEY_PRODUCTION }}
-      AWS_ROLE_ARN: ${{ (needs.publish_config.outputs.publish_version == 'v2' && secrets.OHAI_AWS_ROLE_ARN_PRODUCTION_V2) || secrets.OHAI_AWS_ROLE_ARN_PRODUCTION }}
-      AWS_ROLE_SESSION_NAME: ${{ (needs.publish_config.outputs.publish_version == 'v2' && secrets.OHAI_AWS_ROLE_SESSION_NAME_PRODUCTION_V2) || secrets.OHAI_AWS_ROLE_SESSION_NAME_PRODUCTION }}
     steps:
+      - name: Verify v2 credentials are set
+        if: needs.publish_config.outputs.publish_version == 'v2'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.OHAI_AWS_ACCESS_KEY_ID_PRODUCTION_V2 }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.OHAI_AWS_SECRET_ACCESS_KEY_PRODUCTION_V2 }}
+          AWS_ROLE_ARN: ${{ secrets.OHAI_AWS_ROLE_ARN_PRODUCTION_V2 }}
+          AWS_ROLE_SESSION_NAME: ${{ secrets.OHAI_AWS_ROLE_SESSION_NAME_PRODUCTION_V2 }}
+        run: |
+          for v in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_ROLE_ARN AWS_ROLE_SESSION_NAME; do
+            if [ -z "${!v}" ]; then
+              echo "::error::PUBLISH_VERSION=v2 but the PRODUCTION_V2 secret for ${v} is empty"
+              exit 1
+            fi
+          done
+
       - name: Publish linux packages to production
         # commit sha from v1 tag - verify with: git ls-remote https://github.com/newrelic/infrastructure-publish-action v1
         uses: newrelic/infrastructure-publish-action@26d9d8604b2cf2e7343dc287c958e8bbc1a3f750
@@ -60,15 +69,15 @@ jobs:
           repo_name: "newrelic/fluent-bit-package"
           schema: "custom"
           schema_url: "https://github.com/newrelic/fluent-bit-package/releases/download/${{ needs.get_release_tag.outputs.tag }}/generated-linux-schema-production.yaml"
-          aws_access_key_id: ${{ env.AWS_ACCESS_KEY_ID }}
-          aws_secret_access_key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          aws_access_key_id: ${{ (needs.publish_config.outputs.publish_version == 'v2' && secrets.OHAI_AWS_ACCESS_KEY_ID_PRODUCTION_V2) || secrets.OHAI_AWS_ACCESS_KEY_ID_PRODUCTION }}
+          aws_secret_access_key: ${{ (needs.publish_config.outputs.publish_version == 'v2' && secrets.OHAI_AWS_SECRET_ACCESS_KEY_PRODUCTION_V2) || secrets.OHAI_AWS_SECRET_ACCESS_KEY_PRODUCTION }}
           aws_s3_bucket_name: ${{ needs.publish_config.outputs.aws_s3_bucket_name }}
           aws_s3_lock_bucket_name: ${{ needs.publish_config.outputs.aws_s3_lock_bucket_name }}
           access_point_host: ${{ needs.publish_config.outputs.access_point_host }}
           run_id: ${{ github.run_id }}
           aws_region: "us-east-1"
-          aws_role_session_name: ${{ env.AWS_ROLE_SESSION_NAME }}
-          aws_role_arn: ${{ env.AWS_ROLE_ARN }}
+          aws_role_session_name: ${{ (needs.publish_config.outputs.publish_version == 'v2' && secrets.OHAI_AWS_ROLE_SESSION_NAME_PRODUCTION_V2) || secrets.OHAI_AWS_ROLE_SESSION_NAME_PRODUCTION }}
+          aws_role_arn: ${{ (needs.publish_config.outputs.publish_version == 'v2' && secrets.OHAI_AWS_ROLE_ARN_PRODUCTION_V2) || secrets.OHAI_AWS_ROLE_ARN_PRODUCTION }}
           # used for signing package stuff
           gpg_passphrase: ${{ secrets.OHAI_GPG_PASSPHRASE }}
           gpg_private_key_base64: ${{ secrets.OHAI_GPG_PRIVATE_KEY_BASE64 }} # base64 encoded

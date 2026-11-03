@@ -59,6 +59,9 @@ jobs:
             *) echo "::error::PUBLISH_VERSION must be v1 or v2, got '${version}'"; exit 1 ;;
           esac
 
+          # access_point_host is written into the apt mirror source and the generated .repo files, so v2 must
+          # use an explicit URL for its own batch bucket (the "staging"/"production" aliases resolve to the legacy buckets).
+          # The lock buckets are intentionally shared by v1 and v2 so concurrent publishes to either set serialize.
           case "${TARGET_ENV}-${version}" in
             staging-v1)
               bucket="nr-downloads-ohai-staging"
@@ -68,7 +71,7 @@ jobs:
             staging-v2)
               bucket="nr-downloads-ohai-batch-staging"
               lock_bucket="onhost-ci-lock-staging"
-              access_point_host="staging"
+              access_point_host="https://nr-downloads-ohai-batch-staging.s3.amazonaws.com"
               ;;
             production-v1)
               bucket="nr-downloads-main"
@@ -78,7 +81,7 @@ jobs:
             production-v2)
               bucket="nr-downloads-ohai-batch-prod"
               lock_bucket="onhost-ci-lock"
-              access_point_host="production"
+              access_point_host="https://nr-downloads-ohai-batch-prod.s3.amazonaws.com"
               ;;
             *)
               echo "::error::ENV must be staging or production, got '${TARGET_ENV}'"
