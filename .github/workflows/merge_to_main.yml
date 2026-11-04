@@ -74,6 +74,7 @@ jobs:
           aws_s3_bucket_name: ${{ needs.publish_config.outputs.aws_s3_bucket_name }}
           aws_s3_lock_bucket_name: ${{ needs.publish_config.outputs.aws_s3_lock_bucket_name }}
           access_point_host: ${{ needs.publish_config.outputs.access_point_host }}
+          dest_prefix: ${{ needs.publish_config.outputs.dest_prefix }}
           run_id: ${{ github.run_id }}
           aws_region: ${{ needs.publish_config.outputs.aws_region }}
           aws_s3_lock_bucket_region: ${{ needs.publish_config.outputs.aws_s3_lock_bucket_region }}

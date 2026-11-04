@@ -1,15 +1,15 @@
 name: Publish target config
 
-# Single source of truth for which S3 bucket (and credentials) packages are published to.
-# The publish action stays infrastructure-publish-action@v1 (pinned SHA); only the target bucket changes.
+# Single source of truth for where (v1 or v2 layout) packages are published.
+# The publish action stays infrastructure-publish-action@v1 (pinned SHA); only the repository folder changes.
 #
 # The target is selected by the repository variable PUBLISH_VERSION (v1 | v2), defaulting to v1 when unset:
-#   v1 -> legacy buckets (nr-downloads-ohai-staging / nr-downloads-main)
-#   v2 -> batch buckets  (nr-downloads-ohai-batch-staging / nr-downloads-ohai-batch-prod)
+#   v1 -> buckets nr-downloads-ohai-staging / nr-downloads-main, repository path  infrastructure_agent/
+#   v2 -> the SAME buckets, region and lock buckets as v1,        repository path  infrastructure_agent_v2/
 #
 # Rollback: set the repository variable PUBLISH_VERSION back to v1 (or delete it). No code change needed.
-# Before flipping in either direction, sync the buckets so the target repository contains every release
-# published to the other one.
+# Before switching to v2, sync infrastructure_agent/ into infrastructure_agent_v2/ in the bucket so the apt/yum
+# mirror has the existing repository to build on.
 
 on:
   workflow_call:
@@ -20,14 +20,14 @@ on:
         type: string
     outputs:
       publish_version:
-        description: 'Selected bucket set: v1 (legacy) | v2 (batch)'
+        description: 'Selected publish layout: v1 (infrastructure_agent) | v2 (infrastructure_agent_v2)'
         value: ${{ jobs.config.outputs.publish_version }}
       aws_s3_bucket_name:
         value: ${{ jobs.config.outputs.aws_s3_bucket_name }}
       aws_s3_lock_bucket_name:
         value: ${{ jobs.config.outputs.aws_s3_lock_bucket_name }}
       aws_region:
-        description: 'AWS region of the publish bucket: us-east-1 (v1) | us-east-2 (v2)'
+        description: 'AWS region of the publish bucket (us-east-1, shared by v1 and v2)'
         value: ${{ jobs.config.outputs.aws_region }}
       aws_s3_lock_bucket_region:
         description: 'AWS region of the lock bucket (us-east-1 for both v1 and v2)'
@@ -37,6 +37,12 @@ on:
       repo_endpoint:
         description: 'Repository endpoint the E2E tests install from'
         value: ${{ jobs.config.outputs.repo_endpoint }}
+      repo_path:
+        description: 'Repository folder inside the bucket: infrastructure_agent (v1) | infrastructure_agent_v2 (v2)'
+        value: ${{ jobs.config.outputs.repo_path }}
+      dest_prefix:
+        description: 'publish-action dest_prefix: infrastructure_agent/ (v1) | infrastructure_agent_v2/ (v2)'
+        value: ${{ jobs.config.outputs.dest_prefix }}
 
 permissions:
   contents: read
@@ -53,6 +59,8 @@ jobs:
       aws_s3_lock_bucket_region: ${{ steps.resolve.outputs.aws_s3_lock_bucket_region }}
       access_point_host: ${{ steps.resolve.outputs.access_point_host }}
       repo_endpoint: ${{ steps.resolve.outputs.repo_endpoint }}
+      repo_path: ${{ steps.resolve.outputs.repo_path }}
+      dest_prefix: ${{ steps.resolve.outputs.dest_prefix }}
     steps:
       - name: Resolve publish target
         id: resolve
@@ -67,42 +75,37 @@ jobs:
             *) echo "::error::PUBLISH_VERSION must be v1 or v2, got '${version}'"; exit 1 ;;
           esac
 
-          # v1 buckets are in us-east-1, v2 (batch) buckets are in us-east-2. The shared lock buckets stay in us-east-1.
+          # v1 and v2 share buckets, region and lock buckets; only the repository folder differs
+          region="us-east-1"
           lock_bucket_region="us-east-1"
-          case "${version}" in
-            v1) region="us-east-1" ;;
-            v2) region="us-east-2" ;;
-          esac
+          repo_path="infrastructure_agent"
+          [ "${version}" = "v2" ] && repo_path="infrastructure_agent_v2"
 
-          # access_point_host is written into the apt mirror source and the generated .repo files, so v2 must
-          # use an explicit URL for its own batch bucket (the "staging"/"production" aliases resolve to the legacy buckets).
-          # The lock buckets are intentionally shared by v1 and v2 so concurrent publishes to either set serialize.
-          case "${TARGET_ENV}-${version}" in
-            staging-v1)
+          case "${TARGET_ENV}" in
+            staging)
               bucket="nr-downloads-ohai-staging"
               lock_bucket="onhost-ci-lock-staging"
               access_point_host="staging"
               ;;
-            staging-v2)
-              bucket="nr-downloads-ohai-batch-staging"
-              lock_bucket="onhost-ci-lock-staging"
-              access_point_host="https://nr-downloads-ohai-batch-staging.s3.amazonaws.com"
-              ;;
-            production-v1)
+            production)
               bucket="nr-downloads-main"
               lock_bucket="onhost-ci-lock"
               access_point_host="production"
-              ;;
-            production-v2)
-              bucket="nr-downloads-ohai-batch-prod"
-              lock_bucket="onhost-ci-lock"
-              access_point_host="https://nr-downloads-ohai-batch-prod.s3.amazonaws.com"
               ;;
             *)
               echo "::error::ENV must be staging or production, got '${TARGET_ENV}'"
               exit 1
               ;;
           esac
+
+          # access_point_host is written into the apt mirror source and the generated .repo files. The
+          # "staging"/"production" aliases resolve to the v1 repository, so v2 must use an explicit bucket URL.
+          if [ "${version}" = "v2" ]; then
+            access_point_host="https://${bucket}.s3.amazonaws.com"
+            repo_endpoint="https://${bucket}.s3.amazonaws.com/${repo_path}/"
+          else
+            repo_endpoint="https://${bucket}.s3.amazonaws.com/"
+          fi
 
           {
             echo "publish_version=${version}"
@@ -111,7 +114,9 @@ jobs:
             echo "aws_region=${region}"
             echo "aws_s3_lock_bucket_region=${lock_bucket_region}"
             echo "access_point_host=${access_point_host}"
-            echo "repo_endpoint=https://${bucket}.s3.amazonaws.com/"
+            echo "repo_endpoint=${repo_endpoint}"
+            echo "repo_path=${repo_path}"
+            echo "dest_prefix=${repo_path}/"
           } >> "${GITHUB_OUTPUT}"
 
           echo "Publishing ${TARGET_ENV} with bucket set ${version} to s3://${bucket}"

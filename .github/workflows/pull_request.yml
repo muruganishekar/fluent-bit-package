@@ -25,6 +25,7 @@ jobs:
   # Empties the GH pre-release
   # Generates strategy matrices that can be used by other jobs to run the build or testing of all supported packages
   setup_environment:
+    needs: [ publish_config ]
     runs-on: ubuntu-24.04
     outputs:
       pre_release_name: ${{ steps.set_vars.outputs.pre_release_name }}
@@ -71,6 +72,8 @@ jobs:
       # The v4 action throws an error when package names are duplicated, which is the case for Windows packages.
       - name: Compute and upload matrices
         id: set-matrices
+        env:
+          REPO_PATH: ${{ needs.publish_config.outputs.repo_path }}
         run: |
           make versions/generateMatrices
           echo "linux_and_windows_matrix=$( cat versions/linuxAndWindowsMatrix.json )" >> "$GITHUB_OUTPUT"
@@ -105,6 +108,8 @@ jobs:
           echo "always_cleanup_test_instances=${always_cleanup_test_instances}" >> $GITHUB_OUTPUT
 
       - name: Compute and upload schemas
+        env:
+          REPO_PATH: ${{ needs.publish_config.outputs.repo_path }}
         run: |
           make schemas/generateSchemas;
           gh release upload ${{ env.PRE_RELEASE_NAME }} schemas/generated-linux-schema-staging.yaml --repo newrelic/fluent-bit-package
@@ -247,6 +252,7 @@ jobs:
           aws_s3_bucket_name: ${{ needs.publish_config.outputs.aws_s3_bucket_name }}
           aws_s3_lock_bucket_name: ${{ needs.publish_config.outputs.aws_s3_lock_bucket_name }}
           access_point_host: ${{ needs.publish_config.outputs.access_point_host }}
+          dest_prefix: ${{ needs.publish_config.outputs.dest_prefix }}
           run_id: ${{ github.run_id }}
           aws_region: ${{ needs.publish_config.outputs.aws_region }}
           aws_s3_lock_bucket_region: ${{ needs.publish_config.outputs.aws_s3_lock_bucket_region }}
